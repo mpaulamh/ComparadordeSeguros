@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Perfil de usuario del sistema (asesor o administrador)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 512 },
+        "role": { "type": "string", "enum": ["admin", "asesor"] },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "createdAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role", "status"]
+    },
+    "AdminMarker": {
+      "title": "Admin Marker",
+      "description": "Marcador de seguridad de rol administrador para reglas de Firestore",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "ComparisonRecord": {
+      "title": "Comparison Record",
+      "description": "Registro histórico de comparativa realizada por un asesor",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "advisorName": { "type": "string", "maxLength": 128 },
+        "advisorEmail": { "type": "string", "maxLength": 256 },
+        "clientName": { "type": "string", "maxLength": 128 },
+        "vehicle": { "type": "string", "maxLength": 256 },
+        "budget": { "type": "number" },
+        "proposalsCount": { "type": "number" },
+        "bestInsurer": { "type": "string", "maxLength": 128 },
+        "recommendationSummary": { "type": "string", "maxLength": 2048 },
+        "whatsappMessage": { "type": "string", "maxLength": 2048 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "clientName", "vehicle", "budget", "bestInsurer"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "Registro de auditoría de seguridad y trazabilidad de acciones",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "action": { "type": "string", "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 1024 },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["userId", "userEmail", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Almacena los perfiles y roles de los usuarios del sistema"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Directorio de administradores autorizados verificado por reglas de seguridad"
+    },
+    "/comparisons/{comparisonId}": {
+      "schema": { "$ref": "#/entities/ComparisonRecord" },
+      "description": "Historial de comparaciones generadas por asesores"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Trazas de auditoría para seguridad y cumplimiento regulatorio"
+    }
+  }
+}
