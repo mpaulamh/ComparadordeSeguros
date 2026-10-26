@@ -13,7 +13,7 @@ export const Footer: React.FC = () => {
             </p>
           </div>
           <div className="text-[11px] text-slate-400 font-normal shrink-0">
-            BN Corredora de Seguros · San José, Costa Rica
+            Banco de Colombia
           </div>
         </div>
       </div>

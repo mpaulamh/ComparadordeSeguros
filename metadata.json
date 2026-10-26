@@ -1,6 +1,6 @@
 {
-  "name": "Comparador de Propuestas BN",
-  "description": "Compara propuestas de seguro de automóvil en Costa Rica con IA para BN Corredora de Seguros.",
+  "name": "Comparador de Propuestas BC",
+  "description": "Compara propuestas de seguro de automóvil con IA para Banco de Colombia.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

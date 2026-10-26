@@ -1,62 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import {
   FileText,
-  Clock,
   Car,
-  DollarSign,
   ChevronRight,
-  Sparkles,
   Trash2,
   Building,
-  CheckCircle,
 } from 'lucide-react';
-import { collection, query, where, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { useAuth } from '../contexts/AuthContext';
-import { ComparisonResultData } from '../types';
+import { SavedComparisonRecord } from '../types';
 
 interface MyComparisonsProps {
   onLoadSavedComparison: (comparison: any) => void;
 }
 
 export const MyComparisons: React.FC<MyComparisonsProps> = ({ onLoadSavedComparison }) => {
-  const { user, logAuditEvent } = useAuth();
-  const [comparisons, setComparisons] = useState<any[]>([]);
+  const [comparisons, setComparisons] = useState<SavedComparisonRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!user) {
-      setComparisons([]);
-      setLoading(false);
-      return;
-    }
-
-    const path = 'comparisons';
-    // Secure query matching security rules: resource.data.userId == request.auth.uid
-    const q = query(
-      collection(db, path),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      snapshot => {
-        const items: any[] = [];
-        snapshot.forEach(docSnap => {
-          items.push({ id: docSnap.id, ...docSnap.data() });
-        });
-        setComparisons(items);
-        setLoading(false);
-      },
-      error => {
-        console.error('Error fetching comparisons:', error);
-        setLoading(false);
+  const fetchComparisons = async () => {
+    try {
+      const res = await fetch('/api/comparaciones', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setComparisons(data.comparaciones || []);
       }
-    );
+    } catch (err) {
+      console.error('Error al obtener comparaciones:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return () => unsubscribe();
-  }, [user]);
+  useEffect(() => {
+    fetchComparisons();
+  }, []);
 
   const handleDelete = async (id: string, clientName: string) => {
     if (!confirm(`¿Deseas eliminar el expediente de la comparación para ${clientName}?`)) {
@@ -64,11 +40,19 @@ export const MyComparisons: React.FC<MyComparisonsProps> = ({ onLoadSavedCompari
     }
 
     try {
-      await deleteDoc(doc(db, 'comparisons', id));
-      await logAuditEvent('ELIMINAR_COMPARACION', `Asesor eliminó la comparativa id ${id}`);
+      const res = await fetch(`/api/comparaciones/${id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (res.ok) {
+        setComparisons(prev => prev.filter(c => c.id !== id));
+      } else {
+        const err = await res.json();
+        alert(err.error || 'No se pudo eliminar el expediente.');
+      }
     } catch (err: any) {
-      console.error('Error deleting comparison:', err);
-      alert('Error eliminando: ' + (err.message || 'Permisos insuficientes'));
+      console.error('Error eliminando comparación:', err);
+      alert('Error al conectar con el servidor.');
     }
   };
 
@@ -81,10 +65,10 @@ export const MyComparisons: React.FC<MyComparisonsProps> = ({ onLoadSavedCompari
           </div>
           <div>
             <h3 className="text-base font-bold text-slate-900">
-              Mis Comparativas Guardadas
+              Mis Expedientes Guardados
             </h3>
             <p className="text-xs text-slate-500">
-              Consulta y recupera análisis de cotizaciones previas realizadas con tu cuenta.
+              Consulta y recupera análisis de cotizaciones previas almacenadas en el servidor institucional.
             </p>
           </div>
         </div>

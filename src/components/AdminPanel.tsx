@@ -6,168 +6,211 @@ import {
   Activity,
   UserCheck,
   UserX,
-  ShieldAlert,
+  UserPlus,
   Search,
   CheckCircle2,
-  Clock,
   Car,
-  AlertTriangle,
-  RefreshCw,
-  ExternalLink,
+  KeyRound,
+  RotateCcw,
+  X,
 } from 'lucide-react';
-import {
-  collection,
-  onSnapshot,
-  query,
-  orderBy,
-  doc,
-  updateDoc,
-  setDoc,
-  deleteDoc,
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { useAuth, UserProfileData, UserRole, UserStatus } from '../contexts/AuthContext';
+import { AuthUser, SavedComparisonRecord, AuditRecord } from '../types';
 
 export const AdminPanel: React.FC = () => {
-  const { user, logAuditEvent } = useAuth();
   const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'comparisons'>('users');
-  const [usersList, setUsersList] = useState<UserProfileData[]>([]);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [allComparisons, setAllComparisons] = useState<any[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [usersList, setUsersList] = useState<AuthUser[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditRecord[]>([]);
+  const [allComparisons, setAllComparisons] = useState<SavedComparisonRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Subscribe to Users collection
-  useEffect(() => {
-    const path = 'users';
-    const q = query(collection(db, path));
-    const unsubscribe = onSnapshot(
-      q,
-      snapshot => {
-        const users: UserProfileData[] = [];
-        snapshot.forEach(docSnap => {
-          users.push(docSnap.data() as UserProfileData);
-        });
-        setUsersList(users);
-        setLoadingUsers(false);
-      },
-      error => {
-        handleFirestoreError(error, OperationType.LIST, path);
-      }
-    );
+  // New user modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newRole, setNewRole] = useState<'asesor' | 'administrador'>('asesor');
+  const [newPassword, setNewPassword] = useState('Fundepos2026*');
+  const [creatingUser, setCreatingUser] = useState(false);
 
-    return () => unsubscribe();
-  }, []);
+  // Reset password modal state
+  const [resetUser, setResetUser] = useState<AuthUser | null>(null);
+  const [resetPasswordVal, setResetPasswordVal] = useState('Temporal2026*');
+  const [resetting, setResetting] = useState(false);
 
-  // Subscribe to Audit Logs
-  useEffect(() => {
-    const path = 'audit_logs';
-    const q = query(collection(db, path), orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      snapshot => {
-        const logs: any[] = [];
-        snapshot.forEach(docSnap => {
-          logs.push({ id: docSnap.id, ...docSnap.data() });
-        });
-        setAuditLogs(logs);
-      },
-      error => {
-        console.warn('Audit logs listener note:', error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
-
-  // Subscribe to all comparisons
-  useEffect(() => {
-    const path = 'comparisons';
-    const q = query(collection(db, path), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      snapshot => {
-        const comps: any[] = [];
-        snapshot.forEach(docSnap => {
-          comps.push({ id: docSnap.id, ...docSnap.data() });
-        });
-        setAllComparisons(comps);
-      },
-      error => {
-        console.warn('Comparisons listener note:', error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
-
-  const handleRoleChange = async (targetUser: UserProfileData, newRole: UserRole) => {
-    if (targetUser.uid === user?.uid && newRole !== 'admin') {
-      alert('Por seguridad no puedes degradar tu propia cuenta de Administrador.');
-      return;
-    }
-
+  const fetchUsers = async () => {
     try {
-      const userRef = doc(db, 'users', targetUser.uid);
-      await updateDoc(userRef, { role: newRole });
-
-      // If promoting to admin, add to /admins/{uid} marker
-      if (newRole === 'admin') {
-        await setDoc(doc(db, 'admins', targetUser.uid), {
-          uid: targetUser.uid,
-          email: targetUser.email,
-          createdAt: new Date().toISOString(),
-        });
-      } else {
-        // If demoting from admin, remove admin marker
-        try {
-          await deleteDoc(doc(db, 'admins', targetUser.uid));
-        } catch (e) {
-          // ignore
-        }
+      const res = await fetch('/api/usuarios', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setUsersList(data.usuarios || []);
       }
-
-      await logAuditEvent(
-        'CAMBIO_ROL',
-        `Administrador ${user?.email} cambió el rol de ${targetUser.email} a ${newRole}.`
-      );
-
-      setActionSuccess(`Rol de ${targetUser.displayName || targetUser.email} actualizado a ${newRole}.`);
-      setTimeout(() => setActionSuccess(null), 3000);
-    } catch (err: any) {
-      console.error(err);
-      alert('Error al actualizar rol: ' + (err.message || 'Permisos insuficientes'));
+    } catch (e) {
+      console.error('Error cargando usuarios:', e);
     }
   };
 
-  const handleStatusChange = async (targetUser: UserProfileData, newStatus: UserStatus) => {
-    if (targetUser.uid === user?.uid) {
-      alert('No puedes suspender tu propia cuenta activa.');
+  const fetchAuditLogs = async () => {
+    try {
+      const res = await fetch('/api/auditoria', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setAuditLogs(data.logs || []);
+      }
+    } catch (e) {
+      console.error('Error cargando auditoría:', e);
+    }
+  };
+
+  const fetchComparisons = async () => {
+    try {
+      const res = await fetch('/api/comparaciones', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setAllComparisons(data.comparaciones || []);
+      }
+    } catch (e) {
+      console.error('Error cargando comparativas:', e);
+    }
+  };
+
+  useEffect(() => {
+    const loadAll = async () => {
+      setLoading(true);
+      await Promise.all([fetchUsers(), fetchAuditLogs(), fetchComparisons()]);
+      setLoading(false);
+    };
+    loadAll();
+  }, []);
+
+  const showNotification = (type: 'success' | 'error', message: string) => {
+    setFeedback({ type, message });
+    setTimeout(() => setFeedback(null), 3500);
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUsername || !newName || !newPassword) {
+      showNotification('error', 'Por favor complete todos los campos.');
       return;
     }
 
+    setCreatingUser(true);
     try {
-      const userRef = doc(db, 'users', targetUser.uid);
-      await updateDoc(userRef, { status: newStatus });
+      const res = await fetch('/api/usuarios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          usuario: newUsername.trim().toLowerCase(),
+          nombre: newName.trim(),
+          rol: newRole,
+          password: newPassword,
+        }),
+      });
 
-      await logAuditEvent(
-        'CAMBIO_ESTADO',
-        `Administrador ${user?.email} cambió el estado de ${targetUser.email} a ${newStatus}.`
-      );
+      const data = await res.json();
+      if (!res.ok) {
+        showNotification('error', data.error || 'Error al crear usuario.');
+        setCreatingUser(false);
+        return;
+      }
 
-      setActionSuccess(`Estado de ${targetUser.displayName || targetUser.email} actualizado a ${newStatus}.`);
-      setTimeout(() => setActionSuccess(null), 3000);
+      showNotification('success', `Usuario "${data.usuario?.usuario}" creado exitosamente.`);
+      setShowCreateModal(false);
+      setNewUsername('');
+      setNewName('');
+      setNewPassword('Fundepos2026*');
+      await fetchUsers();
+      await fetchAuditLogs();
     } catch (err: any) {
-      console.error(err);
-      alert('Error al actualizar estado: ' + (err.message || 'Permisos insuficientes'));
+      showNotification('error', err.message || 'Error al conectar con el servidor.');
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  const handleRoleChange = async (targetUser: AuthUser, newRoleVal: 'administrador' | 'asesor') => {
+    try {
+      const res = await fetch(`/api/usuarios/${targetUser.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ rol: newRoleVal }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showNotification('error', data.error || 'Error cambiando rol.');
+        return;
+      }
+
+      showNotification('success', `Rol de ${targetUser.nombre} actualizado a ${newRoleVal}.`);
+      await fetchUsers();
+      await fetchAuditLogs();
+    } catch (err: any) {
+      showNotification('error', err.message || 'Error de conexión.');
+    }
+  };
+
+  const handleStatusChange = async (targetUser: AuthUser, newStatus: 'activo' | 'suspendido') => {
+    try {
+      const res = await fetch(`/api/usuarios/${targetUser.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ estado: newStatus }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showNotification('error', data.error || 'Error cambiando estado.');
+        return;
+      }
+
+      showNotification('success', `Estado de ${targetUser.nombre} actualizado a ${newStatus}.`);
+      await fetchUsers();
+      await fetchAuditLogs();
+    } catch (err: any) {
+      showNotification('error', err.message || 'Error de conexión.');
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetUser) return;
+
+    setResetting(true);
+    try {
+      const res = await fetch(`/api/usuarios/${resetUser.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ resetPassword: resetPasswordVal }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showNotification('error', data.error || 'Error restableciendo contraseña.');
+        setResetting(false);
+        return;
+      }
+
+      showNotification('success', `Contraseña temporal establecida para ${resetUser.usuario}.`);
+      setResetUser(null);
+      await fetchUsers();
+      await fetchAuditLogs();
+    } catch (err: any) {
+      showNotification('error', err.message || 'Error de conexión.');
+    } finally {
+      setResetting(false);
     }
   };
 
   const filteredUsers = usersList.filter(
     u =>
-      u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.displayName?.toLowerCase().includes(searchTerm.toLowerCase())
+      u.usuario.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      u.nombre.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -176,7 +219,7 @@ export const AdminPanel: React.FC = () => {
       <div className="bg-gradient-to-r from-[#0b2545] via-[#123963] to-[#0b2545] text-white p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-amber-400 text-[#0b2545] flex items-center justify-center font-bold shadow-md">
+            <div className="w-12 h-12 rounded-xl bg-amber-400 text-[#0b2545] flex items-center justify-center font-bold shadow-md shrink-0">
               <Shield className="w-6 h-6" />
             </div>
             <div>
@@ -184,20 +227,22 @@ export const AdminPanel: React.FC = () => {
                 <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/40">
                   Panel de Control Institucional
                 </span>
-                <span className="text-xs text-blue-200">Seguridad & RBAC</span>
+                <span className="text-xs text-blue-200">Banco de Colombia</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-black text-white mt-0.5">
-                Administración y Control de Usuarios
+                Administración y Gestión de Usuarios
               </h2>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="bg-white/10 px-3.5 py-2 rounded-xl backdrop-blur-sm text-xs text-blue-100 flex items-center gap-2">
-              <Users className="w-4 h-4 text-amber-300" />
-              <span>{usersList.length} usuarios registrados</span>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-[#0b2545] font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer self-start sm:self-auto"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>+ Crear Nuevo Usuario</span>
+          </button>
         </div>
 
         {/* Tab Navigation */}
@@ -212,7 +257,7 @@ export const AdminPanel: React.FC = () => {
             }`}
           >
             <Users className="w-4 h-4" />
-            Gestión de Usuarios y Roles ({usersList.length})
+            Usuarios y Roles ({usersList.length})
           </button>
 
           <button
@@ -225,7 +270,7 @@ export const AdminPanel: React.FC = () => {
             }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
-            Trazabilidad de Propuestas ({allComparisons.length})
+            Expedientes de Propuestas ({allComparisons.length})
           </button>
 
           <button
@@ -243,23 +288,29 @@ export const AdminPanel: React.FC = () => {
         </div>
       </div>
 
-      {actionSuccess && (
-        <div className="p-3 bg-emerald-50 border-b border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2 px-6">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-          <span>{actionSuccess}</span>
+      {feedback && (
+        <div
+          className={`p-3 text-xs font-semibold flex items-center gap-2 px-6 border-b ${
+            feedback.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{feedback.message}</span>
         </div>
       )}
 
-      {/* Tab 1: Users & Roles Management */}
+      {/* Tab 1: Users & Roles */}
       {activeTab === 'users' && (
         <div className="p-6 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                Usuarios y Asesores Autorizados
+                Usuarios Registrados en el Servidor (data/usuarios.json)
               </h3>
               <p className="text-xs text-slate-500">
-                Administra roles con control de acceso basado en atributos (RBAC) y suspende accesos no autorizados.
+                Nadie puede registrarse por su cuenta. Como administrador, usted crea y gestiona cada cuenta.
               </p>
             </div>
 
@@ -267,7 +318,7 @@ export const AdminPanel: React.FC = () => {
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Buscar por correo o nombre..."
+                placeholder="Buscar por usuario o nombre..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0b2545]"
@@ -279,46 +330,28 @@ export const AdminPanel: React.FC = () => {
             <table className="w-full text-left text-xs text-slate-700">
               <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                 <tr>
-                  <th className="py-3 px-4">Usuario / Asesor</th>
-                  <th className="py-3 px-4">Correo Institucional</th>
-                  <th className="py-3 px-4">Rol en el Sistema</th>
+                  <th className="py-3 px-4">Usuario</th>
+                  <th className="py-3 px-4">Nombre Completo</th>
+                  <th className="py-3 px-4">Rol</th>
                   <th className="py-3 px-4">Estado</th>
+                  <th className="py-3 px-4">Clave Pendiente</th>
                   <th className="py-3 px-4">Último Ingreso</th>
-                  <th className="py-3 px-4 text-right">Acciones de Seguridad</th>
+                  <th className="py-3 px-4 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
                 {filteredUsers.map(u => (
-                  <tr key={u.uid} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="py-3 px-4 flex items-center gap-2.5">
-                      {u.photoURL ? (
-                        <img
-                          src={u.photoURL}
-                          alt={u.displayName}
-                          className="w-7 h-7 rounded-full border border-slate-200 object-cover"
-                        />
-                      ) : (
-                        <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs">
-                          {u.displayName?.[0] || 'U'}
-                        </div>
-                      )}
-                      <div>
-                        <div className="font-bold text-slate-900">{u.displayName || 'Sin nombre'}</div>
-                        <div className="text-[10px] text-slate-400 font-mono">UID: {u.uid.substring(0, 10)}...</div>
-                      </div>
+                  <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                      @{u.usuario}
                     </td>
 
-                    <td className="py-3 px-4 font-mono text-[11px] text-slate-800">
-                      {u.email}
-                      {u.uid === user?.uid && (
-                        <span className="ml-1.5 text-[9px] bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded font-bold">
-                          Tú
-                        </span>
-                      )}
+                    <td className="py-3 px-4 font-bold text-slate-800">
+                      {u.nombre}
                     </td>
 
                     <td className="py-3 px-4">
-                      {u.role === 'admin' ? (
+                      {u.rol === 'administrador' ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-purple-100 text-purple-900 border border-purple-200">
                           <Shield className="w-3 h-3 text-purple-700" />
                           Administrador
@@ -326,13 +359,13 @@ export const AdminPanel: React.FC = () => {
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-900 border border-blue-200">
                           <UserCheck className="w-3 h-3 text-blue-700" />
-                          Asesor Final
+                          Asesor
                         </span>
                       )}
                     </td>
 
                     <td className="py-3 px-4">
-                      {u.status === 'active' ? (
+                      {u.estado === 'activo' ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
                           <span className="w-2 h-2 rounded-full bg-emerald-500" />
                           Activo
@@ -345,31 +378,52 @@ export const AdminPanel: React.FC = () => {
                       )}
                     </td>
 
-                    <td className="py-3 px-4 text-slate-500 text-[11px]">
-                      {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('es-CR') : 'No registrado'}
+                    <td className="py-3 px-4">
+                      {u.debeCambiarClave ? (
+                        <span className="text-[10px] bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full font-bold">
+                          Debe cambiarla
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">Personal</span>
+                      )}
                     </td>
 
-                    <td className="py-3 px-4 text-right space-x-1.5">
+                    <td className="py-3 px-4 text-slate-500 text-[11px]">
+                      {u.ultimoAcceso ? new Date(u.ultimoAcceso).toLocaleString('es-CR') : 'Nunca'}
+                    </td>
+
+                    <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
                       {/* Change Role Button */}
                       <button
                         type="button"
-                        onClick={() => handleRoleChange(u, u.role === 'admin' ? 'asesor' : 'admin')}
-                        className="px-2.5 py-1 text-[11px] font-semibold rounded-md border border-slate-300 hover:bg-slate-100 transition-colors cursor-pointer text-slate-700"
+                        onClick={() => handleRoleChange(u, u.rol === 'administrador' ? 'asesor' : 'administrador')}
+                        className="px-2 py-1 text-[11px] font-semibold rounded-md border border-slate-300 hover:bg-slate-100 transition-colors cursor-pointer text-slate-700"
                       >
-                        {u.role === 'admin' ? 'Cambiar a Asesor' : 'Hacer Administrador'}
+                        {u.rol === 'administrador' ? 'Hacer Asesor' : 'Hacer Admin'}
                       </button>
 
                       {/* Suspend / Activate Button */}
                       <button
                         type="button"
-                        onClick={() => handleStatusChange(u, u.status === 'active' ? 'suspended' : 'active')}
-                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-md border transition-colors cursor-pointer ${
-                          u.status === 'active'
+                        onClick={() => handleStatusChange(u, u.estado === 'activo' ? 'suspendido' : 'activo')}
+                        className={`px-2 py-1 text-[11px] font-semibold rounded-md border transition-colors cursor-pointer ${
+                          u.estado === 'activo'
                             ? 'border-rose-200 text-rose-700 hover:bg-rose-50'
                             : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
                         }`}
                       >
-                        {u.status === 'active' ? 'Suspender' : 'Reactivar'}
+                        {u.estado === 'activo' ? 'Suspender' : 'Reactivar'}
+                      </button>
+
+                      {/* Reset Password Button */}
+                      <button
+                        type="button"
+                        onClick={() => setResetUser(u)}
+                        className="px-2 py-1 text-[11px] font-semibold rounded-md border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer"
+                        title="Restablecer contraseña temporal"
+                      >
+                        <KeyRound className="w-3 h-3 inline mr-1" />
+                        Reset Clave
                       </button>
                     </td>
                   </tr>
@@ -380,13 +434,13 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: Comparison Traceability */}
+      {/* Tab 2: Comparisons */}
       {activeTab === 'comparisons' && (
         <div className="p-6 space-y-4">
           <div className="pb-3 border-b border-slate-100 flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                Historial y Trazabilidad de Propuestas
+                Trazabilidad de Expedientes (data/comparaciones.json)
               </h3>
               <p className="text-xs text-slate-500">
                 Supervisión centralizada de todas las cotizaciones de vehículos preparadas por los asesores.
@@ -399,7 +453,7 @@ export const AdminPanel: React.FC = () => {
 
           {allComparisons.length === 0 ? (
             <div className="text-center py-12 text-slate-400 text-xs">
-              No hay propuestas guardadas en la base de datos aún.
+              No hay expedientes guardados en el servidor aún.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -434,7 +488,7 @@ export const AdminPanel: React.FC = () => {
                   </div>
 
                   <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>Asesor: {comp.advisorName || comp.advisorEmail}</span>
+                    <span>Asesor: {comp.advisorName} (@{comp.advisorUsername})</span>
                     <span className="bg-blue-100 text-blue-900 px-1.5 py-0.5 rounded text-[10px] font-bold">
                       {comp.proposalsCount} PDFs
                     </span>
@@ -446,16 +500,16 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 3: Security Audit Log */}
+      {/* Tab 3: Audit Logs */}
       {activeTab === 'audit' && (
         <div className="p-6 space-y-4">
           <div className="pb-3 border-b border-slate-100 flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                Bitácora de Seguridad Inmutable (Audit Trail)
+                Bitácora de Auditoría en Servidor (data/auditoria.json)
               </h3>
               <p className="text-xs text-slate-500">
-                Registro criptográfico de eventos críticos para cumplimiento de seguridad de la corredora.
+                Registro inmutable de accesos, creación de usuarios, cambios de roles y comparativas ejecutadas.
               </p>
             </div>
           </div>
@@ -465,9 +519,9 @@ export const AdminPanel: React.FC = () => {
               <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-4">Fecha y Hora</th>
-                  <th className="py-2.5 px-4">Evento / Acción</th>
-                  <th className="py-2.5 px-4">Usuario Responsable</th>
-                  <th className="py-2.5 px-4">Detalle Técnico</th>
+                  <th className="py-2.5 px-4">Acción</th>
+                  <th className="py-2.5 px-4">Usuario</th>
+                  <th className="py-2.5 px-4">Detalle</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
@@ -478,15 +532,170 @@ export const AdminPanel: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-4">
                       <span className="font-bold text-[#0b2545] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                        {log.action}
+                        {log.accion}
                       </span>
                     </td>
-                    <td className="py-2.5 px-4 text-slate-800">{log.userEmail}</td>
-                    <td className="py-2.5 px-4 text-slate-600 font-sans">{log.details}</td>
+                    <td className="py-2.5 px-4 text-slate-800">@{log.usuario}</td>
+                    <td className="py-2.5 px-4 text-slate-600 font-sans">{log.detalle}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Crear Nuevo Usuario */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 bg-[#07192e]/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-[#0b2545] text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-base">Crear Nuevo Usuario</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="text-blue-200 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateUser} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Nombre de Usuario (corto, sin espacios, minúsculas)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newUsername}
+                  onChange={e => setNewUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
+                  placeholder="ej: jsolis o asesor_este"
+                  className="w-full p-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0b2545]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Nombre Completo
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  placeholder="ej: Javier Solís Mora"
+                  className="w-full p-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0b2545]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Rol Asignado
+                </label>
+                <select
+                  value={newRole}
+                  onChange={e => setNewRole(e.target.value as any)}
+                  className="w-full p-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0b2545]"
+                >
+                  <option value="asesor">Asesor (Usuario final de cotizaciones)</option>
+                  <option value="administrador">Administrador (Control total y usuarios)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Contraseña Inicial Temporal
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="w-full p-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0b2545] font-mono"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  El usuario estará obligado a cambiarla en su primer ingreso.
+                </p>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingUser}
+                  className="px-5 py-2 bg-[#0b2545] text-white text-xs font-bold rounded-xl hover:bg-blue-900 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {creatingUser ? 'Guardando...' : 'Crear Usuario'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Restablecer Contraseña */}
+      {resetUser && (
+        <div className="fixed inset-0 z-50 bg-[#07192e]/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-[#0b2545] text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-sm">Restablecer Contraseña</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetUser(null)}
+                className="text-blue-200 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleResetPassword} className="p-5 space-y-4">
+              <p className="text-xs text-slate-600">
+                Se asignará una contraseña temporal al usuario <strong>@{resetUser.usuario}</strong> y se le obligará a definir una nueva clave al ingresar.
+              </p>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Nueva Contraseña Temporal
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={resetPasswordVal}
+                  onChange={e => setResetPasswordVal(e.target.value)}
+                  className="w-full p-2 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white font-mono"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetUser(null)}
+                  className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetting}
+                  className="px-4 py-1.5 bg-[#0b2545] text-white text-xs font-bold rounded-xl hover:bg-blue-900 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {resetting ? 'Guardando...' : 'Confirmar Reset'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

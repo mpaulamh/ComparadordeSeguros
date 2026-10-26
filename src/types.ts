@@ -51,3 +51,40 @@ export interface ComparisonResultData {
   recomendacionPreliminar: string;
   mensajeWhatsApp: string;
 }
+
+export interface AuthUser {
+  id: string;
+  usuario: string;
+  nombre: string;
+  rol: 'administrador' | 'asesor';
+  estado: 'activo' | 'suspendido';
+  debeCambiarClave: boolean;
+  ultimoAcceso: string | null;
+  fechaCreacion?: string;
+}
+
+export interface SavedComparisonRecord {
+  id: string;
+  userId: string;
+  advisorName: string;
+  advisorUsername: string;
+  clientName: string;
+  vehicle: string;
+  budget: number;
+  proposalsCount: number;
+  bestInsurer: string;
+  recommendationSummary: string;
+  whatsappMessage: string;
+  rawComparison: ComparisonResultData;
+  rawProfile: ClientProfile;
+  createdAt: string;
+}
+
+export interface AuditRecord {
+  id: string;
+  userId: string;
+  usuario: string;
+  accion: string;
+  detalle: string;
+  timestamp: string;
+}

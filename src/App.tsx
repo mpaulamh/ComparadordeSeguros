@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Header } from './components/Header';
 import { ProposalsUploader } from './components/ProposalsUploader';
@@ -6,23 +6,20 @@ import { ClientProfileForm } from './components/ClientProfileForm';
 import { ComparisonResult } from './components/ComparisonResult';
 import { AdminPanel } from './components/AdminPanel';
 import { MyComparisons } from './components/MyComparisons';
+import { LoginScreen } from './components/LoginScreen';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { Footer } from './components/Footer';
 import { ClientProfile, ProposalFile, ComparisonResultData } from './types';
-import { testFirestoreConnection, db, handleFirestoreError, OperationType } from './firebase';
-import { collection, addDoc } from 'firebase/firestore';
 import {
   Sparkles,
   ArrowRight,
   Loader2,
   AlertCircle,
-  ShieldAlert,
-  Lock,
-  LogIn,
-  CheckCircle2,
+  Shield,
 } from 'lucide-react';
 
 function ComparadorApp() {
-  const { user, profile, isAdmin, isSuspended, signInWithGoogle, logAuditEvent } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
 
   const [currentView, setCurrentView] = useState<'comparador' | 'mis-expedientes' | 'admin'>('comparador');
   const [files, setFiles] = useState<ProposalFile[]>([]);
@@ -33,11 +30,6 @@ function ComparadorApp() {
   const [comparisonResult, setComparisonResult] = useState<ComparisonResultData | null>(null);
   const [isSavingComparison, setIsSavingComparison] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
-
-  // Test Firestore connection on app mount
-  useEffect(() => {
-    testFirestoreConnection();
-  }, []);
 
   // Client profile state
   const [clientProfile, setClientProfile] = useState<ClientProfile>({
@@ -60,8 +52,11 @@ function ComparadorApp() {
     setIsLoadingSamples(true);
     setErrorMessage(null);
     try {
-      const res = await fetch('/api/sample-proposals');
+      const res = await fetch('/api/sample-proposals', { credentials: 'include' });
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error('Sesión no válida o expirada. Por favor vuelva a iniciar sesión.');
+        }
         throw new Error('No se pudieron obtener las propuestas de ejemplo.');
       }
       const data = await res.json();
@@ -106,13 +101,8 @@ function ComparadorApp() {
     });
   };
 
-  // Run Gemini comparison with security and audit logging
+  // Run Gemini comparison with session validation
   const handleCompare = async () => {
-    if (isSuspended) {
-      setErrorMessage('Su cuenta de asesor ha sido suspendida. Contacte al administrador del sistema.');
-      return;
-    }
-
     if (files.length === 0) {
       setErrorMessage('Debes subir o cargar al menos un archivo PDF de propuesta aseguradora.');
       return;
@@ -121,7 +111,7 @@ function ComparadorApp() {
     setErrorMessage(null);
     setIsComparing(true);
     setIsSaved(false);
-    setAnalysisStep('Verificando firmas de documentos PDF...');
+    setAnalysisStep('Verificando firmas y documentos PDF...');
 
     try {
       const timer1 = setTimeout(() => {
@@ -141,6 +131,7 @@ function ComparadorApp() {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({
           files: files.map(f => ({ name: f.name, base64: f.base64 })),
           clientProfile,
@@ -153,18 +144,14 @@ function ComparadorApp() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          throw new Error('Sesión no autorizada o expirada. Por favor vuelva a iniciar sesión.');
+        }
         throw new Error(errorData.error || 'Ocurrió un error al procesar las propuestas con Gemini.');
       }
 
       const data: ComparisonResultData = await response.json();
       setComparisonResult(data);
-
-      if (user) {
-        await logAuditEvent(
-          'COMPARACION_EJECUTADA',
-          `Asesor ejecutó comparativa para cliente "${clientProfile.nombre || 'Anónimo'}" (${files.length} propuestas).`
-        );
-      }
 
       // Smooth scroll to results
       setTimeout(() => {
@@ -181,25 +168,18 @@ function ComparadorApp() {
     }
   };
 
-  // Save comparison to Firestore
+  // Save comparison to server JSON store
   const handleSaveComparison = async () => {
-    if (!user) {
-      alert('Debes iniciar sesión para archivar esta comparativa en el expediente institucional.');
-      return;
-    }
-
-    if (!comparisonResult) return;
+    if (!comparisonResult || !user) return;
 
     setIsSavingComparison(true);
     try {
-      const bestProposal = comparisonResult.propuestas.find(p => p.semaforo === 'verde') ||
+      const bestProposal =
+        comparisonResult.propuestas.find(p => p.semaforo === 'verde') ||
         comparisonResult.propuestas.find(p => p.semaforo === 'amarillo') ||
         comparisonResult.propuestas[0];
 
-      const record = {
-        userId: user.uid,
-        advisorName: profile?.displayName || user.displayName || 'Asesor BN',
-        advisorEmail: user.email || '',
+      const payload = {
         clientName: clientProfile.nombre || 'Cliente General',
         vehicle: clientProfile.vehiculo || 'Vehículo particular',
         budget: clientProfile.presupuesto,
@@ -209,21 +189,24 @@ function ComparadorApp() {
         whatsappMessage: comparisonResult.mensajeWhatsApp,
         rawComparison: comparisonResult,
         rawProfile: clientProfile,
-        createdAt: new Date().toISOString(),
       };
 
-      const path = 'comparisons';
-      await addDoc(collection(db, path), record);
+      const res = await fetch('/api/comparaciones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
 
-      await logAuditEvent(
-        'EXPEDIENTE_ARCHIVADO',
-        `Comparativa guardada para ${clientProfile.nombre || 'cliente'} por ${user.email}.`
-      );
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'No se pudo guardar la comparativa en el servidor.');
+      }
 
       setIsSaved(true);
     } catch (err: any) {
       console.error('Error saving comparison:', err);
-      handleFirestoreError(err, OperationType.WRITE, 'comparisons');
+      alert(err.message || 'Error guardando en el expediente.');
     } finally {
       setIsSavingComparison(false);
     }
@@ -252,38 +235,33 @@ function ComparadorApp() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
+        <div className="w-12 h-12 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold mb-4 shadow-lg animate-pulse">
+          <Shield className="w-7 h-7" />
+        </div>
+        <div className="flex items-center gap-2 text-sm font-semibold text-blue-200">
+          <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+          <span>Iniciando sistema de seguridad...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // If not logged in, show login screen (Rule 1 & Rule 6)
+  if (!user) {
+    return <LoginScreen />;
+  }
+
+  // If user has debeCambiarClave, force password change before accessing the app (Rule 7)
+  if (user.debeCambiarClave) {
+    return <ChangePasswordModal />;
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-800">
       <Header currentView={currentView} onViewChange={setCurrentView} />
-
-      {/* Account Suspended Alert Banner */}
-      {isSuspended && (
-        <div className="bg-rose-600 text-white p-3 text-center text-xs font-bold flex items-center justify-center gap-2 shadow-inner">
-          <Lock className="w-4 h-4" />
-          <span>
-            Cuenta restringida por el Administrador. No tiene permisos para ejecutar análisis en producción.
-          </span>
-        </div>
-      )}
-
-      {/* Informational Banner for Guest Users */}
-      {!user && (
-        <div className="bg-blue-900/90 text-blue-100 px-4 py-2 text-xs flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-blue-800">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>
-              <strong>Entorno de Producción Seguro:</strong> Inicie sesión con su cuenta institucional para archivar expedientes y consultar el historial.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={signInWithGoogle}
-            className="text-amber-300 hover:text-white font-bold underline cursor-pointer shrink-0"
-          >
-            Iniciar sesión con Google
-          </button>
-        </div>
-      )}
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* View 1: Administration Panel */}
@@ -291,7 +269,7 @@ function ComparadorApp() {
           <AdminPanel />
         )}
 
-        {/* View 2: Advisor Saved Comparisons Dossiers */}
+        {/* View 2: Saved Comparisons Dossiers */}
         {currentView === 'mis-expedientes' && (
           <MyComparisons onLoadSavedComparison={handleLoadSavedComparison} />
         )}
@@ -304,7 +282,7 @@ function ComparadorApp() {
               <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-3 shadow-xs">
                 <AlertCircle className="w-5 h-5 shrink-0 text-red-600 mt-0.5" />
                 <div className="flex-1">
-                  <p className="font-bold">Atención de Seguridad:</p>
+                  <p className="font-bold">Atención:</p>
                   <p>{errorMessage}</p>
                 </div>
                 <button
@@ -343,7 +321,7 @@ function ComparadorApp() {
               <button
                 type="button"
                 onClick={handleCompare}
-                disabled={isComparing || files.length === 0 || isSuspended}
+                disabled={isComparing || files.length === 0}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-[#0b2545] via-[#123e72] to-[#0b2545] hover:from-[#081d36] hover:to-[#081d36] text-white text-base sm:text-lg font-extrabold rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ring-2 ring-blue-900/30 transform hover:-translate-y-0.5 active:translate-y-0"
               >
                 {isComparing ? (
@@ -390,7 +368,7 @@ function ComparadorApp() {
                   result={comparisonResult}
                   profile={clientProfile}
                   onReset={handleReset}
-                  onSaveComparison={user ? handleSaveComparison : undefined}
+                  onSaveComparison={handleSaveComparison}
                   isSavingComparison={isSavingComparison}
                   isSaved={isSaved}
                 />

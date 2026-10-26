@@ -449,7 +449,7 @@ export const ComparisonResult: React.FC<ComparisonResultProps> = ({
 
         {/* Legend for Semáforo */}
         <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-          <span className="font-bold text-slate-700">Reglas del Semáforo BN:</span>
+          <span className="font-bold text-slate-700">Reglas del Semáforo BC:</span>
           <div className="flex flex-wrap items-center gap-4">
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
